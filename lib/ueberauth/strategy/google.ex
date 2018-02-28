@@ -9,6 +9,9 @@ defmodule Ueberauth.Strategy.Google do
   alias Ueberauth.Auth.Credentials
   alias Ueberauth.Auth.Extra
 
+  # userinfo_endpoint from https://accounts.google.com/.well-known/openid-configuration
+  @userinfo_url "https://www.googleapis.com/oauth2/v3/userinfo"
+
   @doc """
   Handles initial request for Google authentication.
   """
@@ -29,12 +32,26 @@ defmodule Ueberauth.Strategy.Google do
   end
 
   @doc """
+  Gets access token by code
+  """
+  def get_access_token(credentials, opts \\ [])
+
+  def get_access_token([code: _] = params, opts) do
+    Ueberauth.Strategy.Google.OAuth.get_access_token(params, opts)
+  end
+
+  def get_access_token(code, opts) when is_binary(code) do
+    params = [code: code]
+    get_access_token(params, opts)
+  end
+
+  @doc """
   Handles the callback from Google.
   """
   def handle_callback!(%Plug.Conn{params: %{"code" => code}} = conn) do
-    params = [code: code]
     opts = [redirect_uri: callback_url(conn)]
-    case Ueberauth.Strategy.Google.OAuth.get_access_token(params, opts) do
+
+    case get_access_token(code, opts) do
       {:ok, token} ->
         fetch_user(conn, token)
       {:error, {error_code, error_description}} ->
@@ -115,13 +132,16 @@ defmodule Ueberauth.Strategy.Google do
     }
   end
 
+  @doc """
+  Fetches the authenticated user
+  """
+  def fetch_user(token) do
+    Ueberauth.Strategy.Google.OAuth.get(token, @userinfo_url)
+  end
 
-  defp fetch_user(conn, token) do
+  def fetch_user(conn, token) do
     conn = put_private(conn, :google_token, token)
-
-    # userinfo_endpoint from https://accounts.google.com/.well-known/openid-configuration
-    path = "https://www.googleapis.com/oauth2/v3/userinfo"
-    resp = Ueberauth.Strategy.Google.OAuth.get(token, path)
+    resp = fetch_user(token)
 
     case resp do
       {:ok, %OAuth2.Response{status_code: 401, body: _body}} ->
